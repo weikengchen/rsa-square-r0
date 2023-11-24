@@ -35,8 +35,6 @@ pub fn add_small<const I: usize, const J: usize>(accm: &mut [u32; I], new: &[u32
 pub struct Task {
     // 22 limbs, each of length 96 bits = 3 x u32 = 12 x u8
     pub a: [u8; 264],
-    // 22 limbs, each of length 96 bits = 3 x u32 = 12 x u8
-    pub b: [u8; 264],
     // 43 limbs, each of length 224 bits = 7 x u32 = 28 x u8
     // total: 1204 bytes
     pub long_form_c: [u8; 1204],
@@ -78,7 +76,6 @@ fn main() {
     let mut task = MaybeUninit::<Task>::uninit();
     unsafe {
         env::read_slice(&mut (*task.as_mut_ptr()).a);
-        env::read_slice(&mut (*task.as_mut_ptr()).b);
         env::read_slice(&mut (*task.as_mut_ptr()).long_form_c);
         env::read_slice(&mut (*task.as_mut_ptr()).k);
         env::read_slice(&mut (*task.as_mut_ptr()).long_form_kn);
@@ -99,7 +96,6 @@ fn main() {
     let mut hasher = Sha256::new();
     hasher.update(b"RISC Zero RSA Gadget");
     hasher.update(&task.a);
-    hasher.update(&task.b);
     hasher.update(&task.long_form_c);
     hasher.update(&task.k);
     hasher.update(&task.long_form_kn);
@@ -107,7 +103,6 @@ fn main() {
     let final_hash = hasher.finalize().to_vec();
 
     let count_after_hashing = env::get_cycle_count();
-
     const TEST_MODULUS: [u32; 8] = [
         4294967107u32,
         4294967295u32,
@@ -212,7 +207,6 @@ fn main() {
     let count_after_z = env::get_cycle_count();
 
     let mut az = [0u32; 9];
-    let mut bz = [0u32; 9];
     let mut kz = [0u32; 9];
     let mut nz = [0u32; 9];
 
@@ -220,7 +214,6 @@ fn main() {
     let mut knz = [0u32; 9];
 
     let a_ptr = unsafe { transmute::<&u8, &[u32; 66]>(&task.a[0]) };
-    let b_ptr = unsafe { transmute::<&u8, &[u32; 66]>(&task.b[0]) };
     let k_ptr = unsafe { transmute::<&u8, &[u32; 66]>(&task.k[0]) };
     let n_ptr = unsafe { transmute::<&u32, &[u32; 66]>(&N_LIMBS[0]) };
 
@@ -252,30 +245,6 @@ fn main() {
             );
         }
         add_small::<9, 8>(&mut az, &res);
-    }
-
-    for i in 0..22 {
-        let b_limbs = [
-            b_ptr[i * 3],
-            b_ptr[i * 3 + 1],
-            b_ptr[i * 3 + 2],
-            0u32,
-            0,
-            0,
-            0,
-            0,
-        ];
-        unsafe {
-            sys_bigint(
-                &mut res as *mut [u32; BIGINT_WIDTH_WORDS],
-                OP_MULTIPLY,
-                &b_limbs as *const [u32; BIGINT_WIDTH_WORDS],
-                &z[i] as *const [u32; BIGINT_WIDTH_WORDS],
-                &TEST_MODULUS,
-            );
-        }
-
-        add_small::<9, 8>(&mut bz, &res);
     }
 
     for i in 0..22 {
@@ -380,7 +349,7 @@ fn main() {
     }
     let count_after_c_kn = env::get_cycle_count();
 
-    let count_before_reduce_a_b_c_k_n_kn = env::get_cycle_count();
+    let count_before_reduce_a_c_k_n_kn = env::get_cycle_count();
 
     // try reduce
     let mut az_reduce = az.clone();
@@ -397,24 +366,9 @@ fn main() {
                 &TEST_MODULUS,
             );
         }
-        add_small::<9, 8>(&mut az_reduce, &res);
-    }
-
-    let mut bz_reduce = bz.clone();
-    while bz_reduce[8] != 0 {
-        let reducer = [bz_reduce[8], 0, 0, 0, 0, 0, 0, 0];
-        bz_reduce[8] = 0;
-
         unsafe {
-            sys_bigint(
-                &mut res as *mut [u32; BIGINT_WIDTH_WORDS],
-                OP_MULTIPLY,
-                &reducer as *const [u32; BIGINT_WIDTH_WORDS],
-                &[189u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32],
-                &TEST_MODULUS,
-            );
+            add_small::<9, 2>(&mut az_reduce, &transmute::<&[u32; 8], &[u32; 2]>(&res));
         }
-        add_small::<9, 8>(&mut bz_reduce, &res);
     }
 
     let mut cz_reduce = cz.clone();
@@ -431,7 +385,9 @@ fn main() {
                 &TEST_MODULUS,
             );
         }
-        add_small::<9, 8>(&mut cz_reduce, &res);
+        unsafe {
+            add_small::<9, 2>(&mut cz_reduce, &transmute::<&[u32; 8], &[u32; 2]>(&res));
+        }
     }
 
     let mut kz_reduce = kz.clone();
@@ -448,7 +404,9 @@ fn main() {
                 &TEST_MODULUS,
             );
         }
-        add_small::<9, 8>(&mut kz_reduce, &res);
+        unsafe{
+            add_small::<9, 2>(&mut kz_reduce, &transmute::<&[u32; 8], &[u32; 2]>(&res));
+        }
     }
 
     let mut nz_reduce = nz.clone();
@@ -465,7 +423,9 @@ fn main() {
                 &TEST_MODULUS,
             );
         }
-        add_small::<9, 8>(&mut nz_reduce, &res);
+        unsafe {
+            add_small::<9, 2>(&mut nz_reduce, &transmute::<&[u32; 8], &[u32; 2]>(&res));
+        }
     }
 
     let mut knz_reduce = knz.clone();
@@ -482,19 +442,21 @@ fn main() {
                 &TEST_MODULUS,
             );
         }
-        add_small::<9, 8>(&mut knz_reduce, &res);
+        unsafe {
+            add_small::<9, 2>(&mut knz_reduce, &transmute::<&[u32; 8], &[u32; 2]>(&res));
+        }
     }
 
-    let count_after_reduce_a_b_c_k_n_kn = env::get_cycle_count();
+    let count_after_reduce_a_c_k_n_kn = env::get_cycle_count();
 
-    let count_before_az_bz_kz_nz = env::get_cycle_count();
-    let mut az_times_bz = [0u32; 8];
+    let count_before_az_az_kz_nz = env::get_cycle_count();
+    let mut az_times_az = [0u32; 8];
     unsafe {
         sys_bigint(
-            &mut az_times_bz as *mut [u32; BIGINT_WIDTH_WORDS],
+            &mut az_times_az as *mut [u32; BIGINT_WIDTH_WORDS],
             OP_MULTIPLY,
             transmute::<&[u32; 9], &[u32; 8]>(&az_reduce) as *const [u32; BIGINT_WIDTH_WORDS],
-            transmute::<&[u32; 9], &[u32; 8]>(&bz_reduce) as *const [u32; BIGINT_WIDTH_WORDS],
+            transmute::<&[u32; 9], &[u32; 8]>(&az_reduce) as *const [u32; BIGINT_WIDTH_WORDS],
             &TEST_MODULUS,
         );
     }
@@ -510,9 +472,9 @@ fn main() {
         );
     }
 
-    assert_eq!(az_times_bz, cz_reduce[0..8]);
+    assert_eq!(az_times_az, cz_reduce[0..8]);
     assert_eq!(kz_times_nz, knz_reduce[0..8]);
-    let count_after_az_bz_kz_nz = env::get_cycle_count();
+    let count_after_az_az_kz_nz = env::get_cycle_count();
 
     let count_before_reduce_c_kn = env::get_cycle_count();
 
@@ -624,12 +586,12 @@ fn main() {
         count_after_c_kn - count_before_c_kn
     );
     println!(
-        "reducing az, bz, cz, kz, nz, knz = {}",
-        count_after_reduce_a_b_c_k_n_kn - count_before_reduce_a_b_c_k_n_kn
+        "reducing az, cz, kz, nz, knz = {}",
+        count_after_reduce_a_c_k_n_kn - count_before_reduce_a_c_k_n_kn
     );
     println!(
-        "az * bz, kz * nz = {}",
-        count_after_az_bz_kz_nz - count_before_az_bz_kz_nz
+        "az * az, kz * nz = {}",
+        count_after_az_az_kz_nz - count_before_az_az_kz_nz
     );
     println!(
         "reducing c and kn = {}",
